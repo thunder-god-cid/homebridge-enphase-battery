@@ -86,7 +86,6 @@ class EnphaseBatteryPlatform {
       
       // Start polling for updates
       this.startPolling();
-      this.startStormWatchPolling();
       this.startGridStatusPolling();
 
     } catch (error) {
