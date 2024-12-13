@@ -20,6 +20,9 @@ class EnphaseBatteryPlatform {
     
     // Storm watch polling interval (check every 15 minutes)
     this.stormWatchPollInterval = 15 * 60 * 1000;
+
+    // Add grid status polling interval (check every minute)
+    this.gridStatusPollInterval = 60 * 1000;
     
     // Required checks
     if (!this.systemId || !this.apiKey || !this.accessToken) {
@@ -75,15 +78,101 @@ class EnphaseBatteryPlatform {
       // Configure contact sensor service for charging state
       this.configureContactSensorService(batteryAccessory);
 
+      // Configure grid status indicator
+      this.configureGridStatusService(batteryAccessory);
+
       // Configure occupancy sensor for storm watch
       this.configureStormWatchSensor(batteryAccessory);
       
       // Start polling for updates
       this.startPolling();
       this.startStormWatchPolling();
+      this.startGridStatusPolling();
 
     } catch (error) {
       this.log.error('Error discovering devices:', error);
+    }
+  }
+  
+ configureGridStatusService(accessory) {
+    // Get or add lightbulb service for grid status
+    let gridStatusService = accessory.getService('Grid Status') ||
+      accessory.addService(Service.Lightbulb, 'Grid Status', 'gridstatus');
+
+    // Configure as non-dimmable light (just on/off)
+    gridStatusService
+      .getCharacteristic(Characteristic.On)
+      .onGet(this.getGridStatus.bind(this));
+
+    // Add a label to show current grid state
+    gridStatusService
+      .addOptionalCharacteristic(Characteristic.ConfiguredName);
+    gridStatusService
+      .updateCharacteristic(Characteristic.ConfiguredName, 'Grid Connection');
+
+    return gridStatusService;
+  }
+
+  startGridStatusPolling() {
+    // Initial check
+    this.updateGridStatus();
+
+    // Poll every minute
+    setInterval(() => {
+      this.updateGridStatus();
+    }, this.gridStatusPollInterval);
+  }
+
+  async getGridStatus() {
+    try {
+      await this.updateGridStatus();
+      return this.isGridConnected;
+    } catch (error) {
+      this.log.error('Error getting grid status:', error);
+      throw new this.api.hap.HapStatusError(this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+  }
+
+  async updateGridStatus() {
+    try {
+      const response = await fetch(
+        `${this.apiBase}/systems/config/${this.systemId}/grid_status`,
+        {
+          headers: {
+            'Authorization': `Bearer ${this.accessToken}`,
+            'key': this.apiKey
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`API response: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Update all accessories
+      for (const accessory of this.accessories.values()) {
+        const gridStatusService = accessory.getService('Grid Status');
+        
+        if (gridStatusService) {
+          // Check grid state
+          const isConnected = data.grid_state === "On Grid";
+          this.isGridConnected = isConnected;
+          
+          // Update lightbulb state (on when connected, off when disconnected)
+          gridStatusService.updateCharacteristic(
+            Characteristic.On,
+            isConnected
+          );
+
+          // Log status changes
+          this.log.debug(`Grid Status: ${isConnected ? 'Connected' : 'Disconnected'}`);
+        }
+      }
+    } catch (error) {
+      this.log.error('Error fetching grid status:', error);
+      throw error;
     }
   }
 
