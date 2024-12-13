@@ -1,12 +1,11 @@
 {
   "name": "homebridge-enphase-battery",
   "version": "1.0.0",
-  "description": "Homebridge plugin for Enphase battery systems",
+  "description": "Homebridge platform plugin for Enphase battery systems",
   "main": "index.js",
-  "author": "Your Name",
-  "license": "MIT",
   "keywords": [
     "homebridge-plugin",
+    "homebridge-platform",
     "enphase",
     "battery",
     "solar"

@@ -3,14 +3,14 @@ const fetch = require('node-fetch');
 
 let Service, Characteristic;
 
-class EnphaseBatteryPlugin {
+class EnphaseBatteryPlatform {
   constructor(log, config, api) {
     this.log = log;
     this.config = config;
     this.api = api;
+    this.accessories = new Map();
 
     // Configuration
-    this.name = config.name || 'Enphase Battery';
     this.systemId = config.systemId;
     this.apiKey = config.apiKey;
     this.accessToken = config.accessToken;
@@ -24,29 +24,78 @@ class EnphaseBatteryPlugin {
       return;
     }
 
-    // Initialize services when loaded
+    // Initialize when loaded
     this.api.on('didFinishLaunching', () => {
-      this.initializeServices();
-      this.startPolling();
+      this.discoverDevices();
     });
   }
 
-  initializeServices() {
-    // Create battery service
-    this.batteryService = new Service.BatteryService(this.name);
+  async discoverDevices() {
+    try {
+      // Get battery info from Enphase API
+      const response = await fetch(
+        `${this.apiBase}/systems/${this.systemId}/telemetry/battery`,
+        {
+          headers: {
+            'Authorization': `Bearer ${this.accessToken}`,
+            'key': this.apiKey
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`API response: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Generate a unique ID for this battery
+      const uuid = this.api.hap.uuid.generate(`enphase-battery-${this.systemId}`);
+      
+      // See if we already have this accessory
+      let batteryAccessory = this.accessories.get(uuid);
+      
+      if (!batteryAccessory) {
+        // Create new accessory
+        this.log.info('Adding new battery accessory');
+        const displayName = this.config.name || 'Enphase Battery';
+        batteryAccessory = new this.api.platformAccessory(displayName, uuid);
+        
+        // Register the accessory
+        this.api.registerPlatformAccessories('homebridge-enphase-battery', 'EnphaseBattery', [batteryAccessory]);
+        this.accessories.set(uuid, batteryAccessory);
+      }
+
+      // Configure battery service
+      this.configureBatteryService(batteryAccessory);
+      
+      // Start polling for updates
+      this.startPolling();
+
+    } catch (error) {
+      this.log.error('Error discovering devices:', error);
+    }
+  }
+
+  configureBatteryService(accessory) {
+    // Get or add battery service
+    let batteryService = accessory.getService(Service.BatteryService);
+    if (!batteryService) {
+      batteryService = accessory.addService(Service.BatteryService);
+    }
 
     // Battery Level Characteristic
-    this.batteryService
+    batteryService
       .getCharacteristic(Characteristic.BatteryLevel)
       .onGet(this.getBatteryLevel.bind(this));
 
     // Charging State Characteristic
-    this.batteryService
+    batteryService
       .getCharacteristic(Characteristic.ChargingState)
       .onGet(this.getChargingState.bind(this));
 
     // Status Low Battery Characteristic
-    this.batteryService
+    batteryService
       .getCharacteristic(Characteristic.StatusLowBattery)
       .onGet(this.getLowBatteryStatus.bind(this));
   }
@@ -80,30 +129,43 @@ class EnphaseBatteryPlugin {
 
       const data = await response.json();
       
-      // Update battery level
-      if (data.intervals && data.intervals.length > 0) {
-        const lastInterval = data.intervals[data.intervals.length - 1];
-        if (lastInterval.soc && lastInterval.soc.percent !== undefined) {
-          this.currentBatteryLevel = lastInterval.soc.percent;
-          this.batteryService.updateCharacteristic(
-            Characteristic.BatteryLevel,
-            this.currentBatteryLevel
-          );
-        }
+      // Update all battery accessories
+      for (const accessory of this.accessories.values()) {
+        const batteryService = accessory.getService(Service.BatteryService);
         
-        // Update charging state based on charge/discharge values
-        if (lastInterval.charge && lastInterval.discharge) {
-          const isCharging = lastInterval.charge.enwh > 0;
-          const isDischarging = lastInterval.discharge.enwh > 0;
+        if (data.intervals && data.intervals.length > 0) {
+          const lastInterval = data.intervals[data.intervals.length - 1];
           
-          let chargingState = Characteristic.ChargingState.NOT_CHARGING;
-          if (isCharging) {
-            chargingState = Characteristic.ChargingState.CHARGING;
+          // Update battery level
+          if (lastInterval.soc && lastInterval.soc.percent !== undefined) {
+            this.currentBatteryLevel = lastInterval.soc.percent;
+            batteryService.updateCharacteristic(
+              Characteristic.BatteryLevel,
+              this.currentBatteryLevel
+            );
           }
           
-          this.batteryService.updateCharacteristic(
-            Characteristic.ChargingState,
-            chargingState
+          // Update charging state
+          if (lastInterval.charge && lastInterval.discharge) {
+            const isCharging = lastInterval.charge.enwh > 0;
+            let chargingState = isCharging 
+              ? Characteristic.ChargingState.CHARGING 
+              : Characteristic.ChargingState.NOT_CHARGING;
+            
+            batteryService.updateCharacteristic(
+              Characteristic.ChargingState,
+              chargingState
+            );
+          }
+          
+          // Update low battery status
+          const lowBatteryStatus = this.currentBatteryLevel < 20 
+            ? Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW 
+            : Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL;
+          
+          batteryService.updateCharacteristic(
+            Characteristic.StatusLowBattery,
+            lowBatteryStatus
           );
         }
       }
@@ -134,14 +196,15 @@ class EnphaseBatteryPlugin {
   }
 
   async getLowBatteryStatus() {
-    // Consider battery low if less than 20%
     return this.currentBatteryLevel < 20 
       ? Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW 
       : Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL;
   }
 
-  getServices() {
-    return [this.batteryService];
+  configureAccessory(accessory) {
+    // Add restored cached accessory to map
+    this.log.info('Loading accessory from cache:', accessory.displayName);
+    this.accessories.set(accessory.UUID, accessory);
   }
 }
 
@@ -149,5 +212,5 @@ module.exports = (api) => {
   Service = api.hap.Service;
   Characteristic = api.hap.Characteristic;
   
-  api.registerAccessory('homebridge-enphase-battery', 'EnphaseBattery', EnphaseBatteryPlugin);
+  api.registerPlatform('homebridge-enphase-battery', 'EnphaseBattery', EnphaseBatteryPlatform);
 };
