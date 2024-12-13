@@ -362,5 +362,5 @@ module.exports = (api) => {
   Service = api.hap.Service;
   Characteristic = api.hap.Characteristic;
   
-  api.registerPlatform('homebridge-enphase-battery', 'EnphaseBattery', EnphaseBatteryPlatform);
+  api.registerPlatform('homebridge-enphase-battery-redux', 'EnphaseBattery', EnphaseBatteryPlatform);
 };

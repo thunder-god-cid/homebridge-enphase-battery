@@ -1,7 +1,7 @@
 {
-  "name": "homebridge-enphase-battery",
+  "name": "homebridge-enphase-battery-redux",
   "version": "1.0.0",
-  "description": "Homebridge platform plugin for Enphase battery systems",
+  "description": "Homebridge platform plugin for Enphase battery systems, part deux",
   "main": "index.js",
   "keywords": [
     "homebridge-plugin",
