@@ -68,6 +68,9 @@ class EnphaseBatteryPlatform {
 
       // Configure battery service
       this.configureBatteryService(batteryAccessory);
+
+      // Configure contact sensor service for charging state
+      this.configureContactSensorService(batteryAccessory);
       
       // Start polling for updates
       this.startPolling();
@@ -98,6 +101,22 @@ class EnphaseBatteryPlatform {
     batteryService
       .getCharacteristic(Characteristic.StatusLowBattery)
       .onGet(this.getLowBatteryStatus.bind(this));
+  }
+
+  configureContactSensorService(accessory) {
+    // Get or add contact sensor service
+    let contactSensorService = accessory.getService(Service.ContactSensor) ||
+      accessory.addService(Service.ContactSensor, 'Battery Charging', 'charging');
+
+    // Set initial state
+    contactSensorService
+      .getCharacteristic(Characteristic.ContactSensorState)
+      .onGet(this.getContactSensorState.bind(this));
+  }
+
+  getContactSensorState() {
+    // Return CONTACT_NOT_DETECTED (1) when charging, CONTACT_DETECTED (0) when not charging
+    return this.isCharging ? Characteristic.ContactSensorState.CONTACT_NOT_DETECTED : Characteristic.ContactSensorState.CONTACT_DETECTED;
   }
 
   startPolling() {
@@ -132,6 +151,7 @@ class EnphaseBatteryPlatform {
       // Update all battery accessories
       for (const accessory of this.accessories.values()) {
         const batteryService = accessory.getService(Service.BatteryService);
+        const contactSensorService = accessory.getService(Service.ContactSensor);
         
         if (data.intervals && data.intervals.length > 0) {
           const lastInterval = data.intervals[data.intervals.length - 1];
@@ -145,9 +165,11 @@ class EnphaseBatteryPlatform {
             );
           }
           
-          // Update charging state
+          // Update charging state and contact sensor
           if (lastInterval.charge && lastInterval.discharge) {
             const isCharging = lastInterval.charge.enwh > 0;
+            this.isCharging = isCharging;
+            
             let chargingState = isCharging 
               ? Characteristic.ChargingState.CHARGING 
               : Characteristic.ChargingState.NOT_CHARGING;
@@ -155,6 +177,12 @@ class EnphaseBatteryPlatform {
             batteryService.updateCharacteristic(
               Characteristic.ChargingState,
               chargingState
+            );
+
+            // Update contact sensor state
+            contactSensorService.updateCharacteristic(
+              Characteristic.ContactSensorState,
+              isCharging ? Characteristic.ContactSensorState.CONTACT_NOT_DETECTED : Characteristic.ContactSensorState.CONTACT_DETECTED
             );
           }
           
@@ -188,7 +216,7 @@ class EnphaseBatteryPlatform {
   async getChargingState() {
     try {
       await this.updateBatteryStatus();
-      return this.currentChargingState;
+      return this.isCharging ? Characteristic.ChargingState.CHARGING : Characteristic.ChargingState.NOT_CHARGING;
     } catch (error) {
       this.log.error('Error getting charging state:', error);
       throw new this.api.hap.HapStatusError(this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
