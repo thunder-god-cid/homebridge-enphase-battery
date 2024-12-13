@@ -185,7 +185,7 @@ class EnphaseBatteryPlatform {
       this.updateGridStatus();
     }, this.gridStatusPollInterval);
   }
-  
+
   configureBatteryService(accessory) {
     // Get or add battery service
     let batteryService = accessory.getService(Service.BatteryService);
@@ -250,16 +250,6 @@ class EnphaseBatteryPlatform {
         this.log.error('Error updating battery status:', error);
       }
     }, 5 * 60 * 1000);
-  }
-
-  startStormWatchPolling() {
-    // Initial check
-    this.updateStormWatchStatus();
-
-    // Poll every 15 minutes
-    setInterval(() => {
-      this.updateStormWatchStatus();
-    }, this.stormWatchPollInterval);
   }
 
   async updateBatteryStatus() {
@@ -332,48 +322,6 @@ class EnphaseBatteryPlatform {
     } catch (error) {
       this.log.error('Error fetching battery status:', error);
       throw error;
-    }
-  }
-
-  async updateStormWatchStatus() {
-    try {
-      const response = await fetch(
-        `${this.apiBase}/systems/config/${this.systemId}/storm_guard`,
-        {
-          headers: {
-            'Authorization': `Bearer ${this.accessToken}`,
-            'key': this.apiKey
-          }
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`API response: ${response.status}`);
-      }
-
-      const data = await response.json();
-      
-      // Update all accessories
-      for (const accessory of this.accessories.values()) {
-        const stormWatchService = accessory.getService('Storm Watch');
-        
-        if (stormWatchService) {
-          // Check if storm watch is enabled and there's an active alert
-          const isActive = data.storm_guard_status === "enabled" && data.storm_alert === "true";
-          this.isStormWatch = isActive;
-          
-          // Update occupancy sensor state
-          stormWatchService.updateCharacteristic(
-            Characteristic.OccupancyDetected,
-            isActive ? Characteristic.OccupancyDetected.OCCUPANCY_DETECTED : Characteristic.OccupancyDetected.OCCUPANCY_NOT_DETECTED
-          );
-
-          // Log status changes
-          this.log.debug(`Storm Watch Status: ${isActive ? 'Active' : 'Inactive'}`);
-        }
-      }
-    } catch (error) {
-      this.log.error('Error fetching storm watch status:', error);
     }
   }
 
