@@ -93,7 +93,7 @@ class EnphaseBatteryPlatform {
       this.log.error('Error discovering devices:', error);
     }
   }
-  
+
  configureGridStatusService(accessory) {
     // Get or add lightbulb service for grid status
     let gridStatusService = accessory.getService('Grid Status') ||
@@ -133,10 +133,10 @@ class EnphaseBatteryPlatform {
     }
   }
 
-  async updateGridStatus() {
+    async updateGridStatus() {
     try {
       const response = await fetch(
-        `${this.apiBase}/systems/config/${this.systemId}/grid_status`,
+        `${this.apiBase}/systems/${this.systemId}/summary`,
         {
           headers: {
             'Authorization': `Bearer ${this.accessToken}`,
@@ -156,8 +156,9 @@ class EnphaseBatteryPlatform {
         const gridStatusService = accessory.getService('Grid Status');
         
         if (gridStatusService) {
-          // Check grid state
-          const isConnected = data.grid_state === "On Grid";
+          // Check grid state from status field
+          // 'normal' indicates grid-connected operation
+          const isConnected = data.status === "normal";
           this.isGridConnected = isConnected;
           
           // Update lightbulb state (on when connected, off when disconnected)
@@ -167,15 +168,24 @@ class EnphaseBatteryPlatform {
           );
 
           // Log status changes
-          this.log.debug(`Grid Status: ${isConnected ? 'Connected' : 'Disconnected'}`);
+          this.log.debug(`Grid Status: ${isConnected ? 'Connected' : 'Disconnected'} (System Status: ${data.status})`);
         }
       }
     } catch (error) {
       this.log.error('Error fetching grid status:', error);
-      throw error;
     }
   }
 
+  startGridStatusPolling() {
+    // Initial check
+    this.updateGridStatus();
+
+    // Poll every 2 minutes
+    setInterval(() => {
+      this.updateGridStatus();
+    }, this.gridStatusPollInterval);
+  }
+  
   configureBatteryService(accessory) {
     // Get or add battery service
     let batteryService = accessory.getService(Service.BatteryService);
