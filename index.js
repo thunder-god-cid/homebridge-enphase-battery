@@ -18,6 +18,9 @@ class EnphaseBatteryPlatform {
     // API endpoints
     this.apiBase = 'https://api.enphaseenergy.com/api/v4';
     
+    // Storm watch polling interval (check every 15 minutes)
+    this.stormWatchPollInterval = 15 * 60 * 1000;
+    
     // Required checks
     if (!this.systemId || !this.apiKey || !this.accessToken) {
       this.log.error('Missing required configuration. Please check your config.json');
@@ -71,9 +74,13 @@ class EnphaseBatteryPlatform {
 
       // Configure contact sensor service for charging state
       this.configureContactSensorService(batteryAccessory);
+
+      // Configure occupancy sensor for storm watch
+      this.configureStormWatchSensor(batteryAccessory);
       
       // Start polling for updates
       this.startPolling();
+      this.startStormWatchPolling();
 
     } catch (error) {
       this.log.error('Error discovering devices:', error);
@@ -105,7 +112,7 @@ class EnphaseBatteryPlatform {
 
   configureContactSensorService(accessory) {
     // Get or add contact sensor service
-    let contactSensorService = accessory.getService(Service.ContactSensor) ||
+    let contactSensorService = accessory.getService('Battery Charging') ||
       accessory.addService(Service.ContactSensor, 'Battery Charging', 'charging');
 
     // Set initial state
@@ -114,9 +121,25 @@ class EnphaseBatteryPlatform {
       .onGet(this.getContactSensorState.bind(this));
   }
 
+  configureStormWatchSensor(accessory) {
+    // Get or add occupancy sensor service for storm watch
+    let stormWatchService = accessory.getService('Storm Watch') ||
+      accessory.addService(Service.OccupancySensor, 'Storm Watch', 'stormwatch');
+
+    // Set initial state
+    stormWatchService
+      .getCharacteristic(Characteristic.OccupancyDetected)
+      .onGet(this.getStormWatchState.bind(this));
+  }
+
   getContactSensorState() {
     // Return CONTACT_NOT_DETECTED (1) when charging, CONTACT_DETECTED (0) when not charging
     return this.isCharging ? Characteristic.ContactSensorState.CONTACT_NOT_DETECTED : Characteristic.ContactSensorState.CONTACT_DETECTED;
+  }
+
+  getStormWatchState() {
+    // Return OCCUPANCY_DETECTED (1) when storm watch is active, NOT_DETECTED (0) when inactive
+    return this.isStormWatch ? Characteristic.OccupancyDetected.OCCUPANCY_DETECTED : Characteristic.OccupancyDetected.OCCUPANCY_NOT_DETECTED;
   }
 
   startPolling() {
@@ -128,6 +151,16 @@ class EnphaseBatteryPlatform {
         this.log.error('Error updating battery status:', error);
       }
     }, 5 * 60 * 1000);
+  }
+
+  startStormWatchPolling() {
+    // Initial check
+    this.updateStormWatchStatus();
+
+    // Poll every 15 minutes
+    setInterval(() => {
+      this.updateStormWatchStatus();
+    }, this.stormWatchPollInterval);
   }
 
   async updateBatteryStatus() {
@@ -151,7 +184,7 @@ class EnphaseBatteryPlatform {
       // Update all battery accessories
       for (const accessory of this.accessories.values()) {
         const batteryService = accessory.getService(Service.BatteryService);
-        const contactSensorService = accessory.getService(Service.ContactSensor);
+        const contactSensorService = accessory.getService('Battery Charging');
         
         if (data.intervals && data.intervals.length > 0) {
           const lastInterval = data.intervals[data.intervals.length - 1];
@@ -200,6 +233,48 @@ class EnphaseBatteryPlatform {
     } catch (error) {
       this.log.error('Error fetching battery status:', error);
       throw error;
+    }
+  }
+
+  async updateStormWatchStatus() {
+    try {
+      const response = await fetch(
+        `${this.apiBase}/systems/config/${this.systemId}/storm_guard`,
+        {
+          headers: {
+            'Authorization': `Bearer ${this.accessToken}`,
+            'key': this.apiKey
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`API response: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Update all accessories
+      for (const accessory of this.accessories.values()) {
+        const stormWatchService = accessory.getService('Storm Watch');
+        
+        if (stormWatchService) {
+          // Check if storm watch is enabled and there's an active alert
+          const isActive = data.storm_guard_status === "enabled" && data.storm_alert === "true";
+          this.isStormWatch = isActive;
+          
+          // Update occupancy sensor state
+          stormWatchService.updateCharacteristic(
+            Characteristic.OccupancyDetected,
+            isActive ? Characteristic.OccupancyDetected.OCCUPANCY_DETECTED : Characteristic.OccupancyDetected.OCCUPANCY_NOT_DETECTED
+          );
+
+          // Log status changes
+          this.log.debug(`Storm Watch Status: ${isActive ? 'Active' : 'Inactive'}`);
+        }
+      }
+    } catch (error) {
+      this.log.error('Error fetching storm watch status:', error);
     }
   }
 
