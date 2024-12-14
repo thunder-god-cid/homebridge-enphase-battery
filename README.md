@@ -34,7 +34,7 @@ That _should_ be it, but please see the FAQ if something breaks.
 So now you got all that, you need to do this with it in your json config
 
 
-    "platform": "EnphaseBattery",
+    "platform": "EnphaseBatteryRedux",
     "name": "EnphaseBattery",
     "systemId": "[your system id goes here]",
     "apiKey": "[your api key goes here]",
@@ -45,5 +45,7 @@ that should be it!
 ### How it works in Homekit!
 
 well, it's not perfect, but you get 
-1. an occupancy sensor: this shows the Storm Watch status.
-2. 
+
+1. an occupancy sensor: this shows the Storm Watch status. a NO MOTION means no storm watch.
+2. A contact sensor. OPEN means it's charging.
+3. A light; this is your grid connection. LIT means you've got a grid connection. 
